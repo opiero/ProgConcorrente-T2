@@ -1,7 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
-//#include <omp.h>
-//#include <mpi.h>
+#include <omp.h>
+#include <mpi.h>
 
 #define MATRIX_FILE "matriz.txt"
 #define VECTOR_FILE "vetor.txt"
@@ -14,8 +14,7 @@ typedef double element;
 
 
 
-long int get_filesize(FILE * file)
-{
+long int get_filesize(FILE * file) {
 	long int cur_pos = ftell(file);
 	fseek(file, 0, SEEK_END);
 	long int filesize = ftell(file);
@@ -39,7 +38,7 @@ element * read_vect(char * filename, int * col){
 			vect = (element*) realloc(vect, alloced_col*sizeof(element));
 		}
 
-		fscanf(vect_file, "%lf", vect + (*col));
+		if (fscanf(vect_file, "%lf", vect + (*col)) != 1) printf("Reading error\n");
 		fgetc(vect_file); fgetc(vect_file);
 		(*col)++;
 	}
@@ -68,7 +67,7 @@ element ** read_mat(char * filename, int * row, int * col) {
 			aux_vect = (element*) realloc(aux_vect, alloced_col*sizeof(element));
 		}
 
-		fscanf(mat_file, "%lf", aux_vect + (*col));
+		if (fscanf(mat_file, "%lf", aux_vect + (*col)) != 1) printf("Reading error\n");
 		cur_char = fgetc(mat_file);
 		(*col)++;
 	}
@@ -91,7 +90,7 @@ element ** read_mat(char * filename, int * row, int * col) {
 
 		int i;
 		mat[(*row)] = (element*) malloc(((*col)+1)*sizeof(element));
-		for (i=0; i<(*col); i++) fscanf(mat_file, "%lf", mat[(*row)] + i);
+		for (i=0; i<(*col); i++) if (fscanf(mat_file, "%lf", mat[(*row)] + i) != 1) printf("Reading error\n");
 		(*row)++;
 		fgetc(mat_file); fgetc(mat_file);
 	}
@@ -116,8 +115,7 @@ void free_mat(element ** mat, int row) {
 
 
 
-void append_col(element ** mat, int mrow, int * mcol, element * vect, int vcol)
-{
+void append_col(element ** mat, int mrow, int * mcol, element * vect) {
 	int i;
 	for (i=0; i<mrow; i++) mat[i][(*mcol)] = vect[i];
 	(*mcol)++;
@@ -126,17 +124,10 @@ void append_col(element ** mat, int mrow, int * mcol, element * vect, int vcol)
 
 
 int main (int argc, char * argv[]) {
-
-	int vcol;
-	element * vect = read_vect(VECTOR_FILE, &vcol);
-	printf("%d\n", vcol);
-	print_vect(vect, vcol);
-
-	int mrow, mcol;
+	int vcol, mrow, mcol;
 	element ** mat = read_mat(MATRIX_FILE, &mrow, &mcol);
-	//append_col(mat, mrow, &mcol, vect, vcol);	
-	printf("%d %d\n", mrow, mcol);
-	print_mat(mat, mrow, mcol);
+	element * vect = read_vect(VECTOR_FILE, &vcol);
+	append_col(mat, mrow, &mcol, vect);	
 	
 	free_mat(mat, mrow);
 	free(vect);
