@@ -128,23 +128,20 @@ int main (int argc, char * argv[]) {
 	element ** mat = read_mat(MATRIX_FILE, &mrow, &mcol);
 	element * vect = read_vect(VECTOR_FILE, &vcol);
 	append_col(mat, mrow, &mcol, vect);	
-	
-	free_mat(mat, mrow);
 	free(vect);
-	return 0;
-
-	/*int row, col;
-	element ** mat = read_mat(MATRIX_FILE, &row, &col);
+	
+	
 
 	int my_rank = -1;
-	int num_proc;
-
 	MPI_Init(&argc, &argv);
 	MPI_Comm_rank(MPI_COMM_WORLD, &my_rank);
 
-
+	/*
+	Everything
+	*/
 
 	MPI_Finalize();
 
-	return EXIT_SUCCESS;*/
+	free_mat(mat, mrow);
+	return EXIT_SUCCESS;
 }
