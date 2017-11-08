@@ -16,6 +16,7 @@ Professor: 	Paulo Sergio Lopes de Souza
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <omp.h>
 #include <mpi.h>
 
@@ -23,95 +24,90 @@ Professor: 	Paulo Sergio Lopes de Souza
 #define VECTOR_FILE "vetor.txt"
 #define OUTPUT_FILE "resultado.txt"
 
-#define ALLOC_INIT_SIZE 8 //Nao pode ser 0
-#define LINE_ENDER 13
+#define ALLOC_INIT_SIZE 8 //Nao pode ser < 0
+#define DELIMITERS " \t\n\0,;"
 
 typedef double element;
 
 
 
-long int get_filesize(FILE * file) {
-	long int cur_pos = ftell(file);
-	fseek(file, 0, SEEK_END);
-	long int filesize = ftell(file);
-	fseek(file, cur_pos, SEEK_SET);
+element * read_vect(char * filename, int * row){
+	(*row) = 0;
+	int alloced_row = ALLOC_INIT_SIZE;
+	element * vect = (element*) malloc(alloced_row*sizeof(element));
 
-	return filesize;
-}
-
-
-
-element * read_vect(char * filename, int * col){
-	(*col) = 0;
-	int alloced_col = ALLOC_INIT_SIZE;
-	element * vect = (element*) malloc(alloced_col*sizeof(element));
-
+	size_t linesize = 0;
+	char * line = NULL;
 	FILE * vect_file = fopen(filename, "r");
-	long int filesize = get_filesize(vect_file);
-	while(ftell(vect_file) < filesize){
-		if ((*col) == alloced_col){
-			alloced_col*=2;
-			vect = (element*) realloc(vect, alloced_col*sizeof(element));
+	while(getline(&line, &linesize, vect_file) != -1){
+		while ((*row) >= alloced_row){
+			alloced_row*=2;
+			vect = (element*) realloc(vect, alloced_row*sizeof(element));
 		}
 
-		if (fscanf(vect_file, "%lf", vect + (*col)) != 1) printf("Reading error\n");
-		fgetc(vect_file); fgetc(vect_file);
-		(*col)++;
+		sscanf(line, "%lf", vect + ((*row)++));
+		free(line);
+		line = NULL;
 	}
-
+	free(line);
 	fclose(vect_file);
+
 	return vect;
 }
 
-void print_vect(element * vect, int col){
+void print_vect(element * vect, int row){
 	int i;
-	for (i=0; i<col; i++) printf("%.3lf\n", vect[i]);
+	for (i=0; i<row; i++) printf("%.3lf\n", vect[i]);
 }
 
 
 
 element ** read_mat(char * filename, int * row, int * col) {
-	(*col) = 0;
-	int alloced_col = ALLOC_INIT_SIZE;
-	element * aux_vect = (element*) malloc(alloced_col*sizeof(element));
+	(*row) = (*col) = 0;
+	int alloced_col = ALLOC_INIT_SIZE, alloced_row = ALLOC_INIT_SIZE;
+	element ** mat = (element**) malloc(alloced_row*sizeof(element*));
+	(*mat) = (element*) malloc(alloced_col*sizeof(element));
 
-	char cur_char = 0;
+	size_t linesize = 0;
+	char * line = NULL;
 	FILE * mat_file = fopen(filename, "r");
-	while (cur_char != LINE_ENDER){
-		if ((*col) == alloced_col){
+	getline(&line, &linesize, mat_file);
+	char * aux_str = strtok(line, DELIMITERS);
+	while(aux_str != NULL){
+		while ((*col) >= alloced_col){
 			alloced_col*=2;
-			aux_vect = (element*) realloc(aux_vect, alloced_col*sizeof(element));
+			(*mat) = (element*) realloc((*mat), alloced_col*sizeof(element));
 		}
 
-		if (fscanf(mat_file, "%lf", aux_vect + (*col)) != 1) printf("Reading error\n");
-		cur_char = fgetc(mat_file);
-		(*col)++;
+		sscanf(aux_str, "%lf", (*mat) + ((*col)++));
+		aux_str = strtok(NULL, DELIMITERS);
 	}
-	fgetc(mat_file);
-	if ((*col) == alloced_col){
-		alloced_col++;
-		aux_vect = (element*) realloc(aux_vect, alloced_col*sizeof(element));
-	}
+	if (alloced_col < (*col)+1) (*mat) = (element*) realloc((*mat), ((*col)+1)*sizeof(element));
+	free(line);
 
-	int alloced_row = ALLOC_INIT_SIZE;
-	element ** mat = (element**) malloc(alloced_row*sizeof(element*));
-	mat[0] = aux_vect;
+	line = NULL;
 	(*row) = 1;
-	long int filesize = get_filesize(mat_file);
-	while(ftell(mat_file) < filesize){
-		if ((*row) == alloced_row){
+	while (getline(&line, &linesize, mat_file) != -1){
+		while ((*row) >= alloced_row){
 			alloced_row*=2;
 			mat = (element**) realloc(mat, alloced_row*sizeof(element*));
 		}
-
-		int i;
 		mat[(*row)] = (element*) malloc(((*col)+1)*sizeof(element));
-		for (i=0; i<(*col); i++) if (fscanf(mat_file, "%lf", mat[(*row)] + i) != 1) printf("Reading error\n");
-		(*row)++;
-		fgetc(mat_file); fgetc(mat_file);
-	}
 
+		int cur_col = 0;
+		aux_str = strtok(line, DELIMITERS);
+		while(aux_str != NULL) {
+			sscanf(aux_str, "%lf", mat[(*row)] + (cur_col++));
+			aux_str = strtok(NULL, DELIMITERS);
+		}
+
+		(*row)++;
+		free(line);
+		line = NULL;
+	}
+	free(line);
 	fclose(mat_file);
+
 	return mat;
 }
 
@@ -131,7 +127,6 @@ void free_mat(element ** mat, int row) {
 
 
 
-
 void append_col(element ** mat, int mrow, int * mcol, element * vect) {
 	int i;
 	for (i=0; i<mrow; i++) mat[i][(*mcol)] = vect[i];
@@ -141,16 +136,15 @@ void append_col(element ** mat, int mrow, int * mcol, element * vect) {
 
 
 int main (int argc, char * argv[]) {
-
-
-	int vcol, mrow, mcol;
+	int vrow, mrow, mcol;
 	element ** mat = read_mat(MATRIX_FILE, &mrow, &mcol);
-	element * vect = read_vect(VECTOR_FILE, &vcol);
+	element * vect = read_vect(VECTOR_FILE, &vrow);
 	append_col(mat, mrow, &mcol, vect);
 	free(vect);
 
-
-
+	print_vect(vect, vrow);
+	print_mat(mat, mrow, mcol);
+/*
 	int order;
 	int my_rank = -1;
 	int num_proc;
@@ -174,10 +168,8 @@ int main (int argc, char * argv[]) {
 
 	}
 
+	MPI_Finalize();*/
 
-	MPI_Finalize();
-
-	free_mat(mat, row);
-
+	free_mat(mat, mrow);
 	return EXIT_SUCCESS;
 }

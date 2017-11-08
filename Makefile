@@ -10,3 +10,7 @@ run:
 test:
 	mpicc gaussjordan.c -Wall -Wextra -g -fopenmp -o gaussjordan.out
 	mpirun ./gaussjordan.out
+
+val:
+	mpicc gaussjordan.c -Wall -Wextra -g -fopenmp -o gaussjordan.out
+	valgrind --leak-check=full --track-origins=yes ./gaussjordan.out
