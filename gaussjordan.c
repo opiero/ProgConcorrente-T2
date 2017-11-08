@@ -31,8 +31,8 @@ typedef double element;
 
 
 
-element * read_vect(char * filename, int * row){
-	(*row) = 0;
+element * read_vect(char * filename, int * nrows){
+	(*nrows) = 0;
 	int alloced_row = ALLOC_INIT_SIZE;
 	element * vect = (element*) malloc(alloced_row*sizeof(element));
 
@@ -40,12 +40,12 @@ element * read_vect(char * filename, int * row){
 	char * line = NULL;
 	FILE * vect_file = fopen(filename, "r");
 	while(getline(&line, &linesize, vect_file) != -1){
-		while ((*row) >= alloced_row){
+		while ((*nrows) >= alloced_row){
 			alloced_row*=2;
 			vect = (element*) realloc(vect, alloced_row*sizeof(element));
 		}
 
-		sscanf(line, "%lf", vect + ((*row)++));
+		sscanf(line, "%lf", vect + ((*nrows)++));
 		free(line);
 		line = NULL;
 	}
@@ -55,15 +55,15 @@ element * read_vect(char * filename, int * row){
 	return vect;
 }
 
-void print_vect(element * vect, int row){
+void print_vect(element * vect, int nrows){
 	int i;
-	for (i=0; i<row; i++) printf("%.3lf\n", vect[i]);
+	for (i=0; i<nrows; i++) printf("%.3lf\n", vect[i]);
 }
 
 
 
-element ** read_mat(char * filename, int * row, int * col) {
-	(*row) = (*col) = 0;
+element ** read_mat(char * filename, int * nrows, int * ncols) {
+	(*nrows) = (*ncols) = 0;
 	int alloced_col = ALLOC_INIT_SIZE, alloced_row = ALLOC_INIT_SIZE;
 	element ** mat = (element**) malloc(alloced_row*sizeof(element*));
 	(*mat) = (element*) malloc(alloced_col*sizeof(element));
@@ -74,34 +74,34 @@ element ** read_mat(char * filename, int * row, int * col) {
 	getline(&line, &linesize, mat_file);
 	char * aux_str = strtok(line, DELIMITERS);
 	while(aux_str != NULL){
-		while ((*col) >= alloced_col){
+		while ((*ncols) >= alloced_col){
 			alloced_col*=2;
 			(*mat) = (element*) realloc((*mat), alloced_col*sizeof(element));
 		}
 
-		sscanf(aux_str, "%lf", (*mat) + ((*col)++));
+		sscanf(aux_str, "%lf", (*mat) + ((*ncols)++));
 		aux_str = strtok(NULL, DELIMITERS);
 	}
-	if (alloced_col < (*col)+1) (*mat) = (element*) realloc((*mat), ((*col)+1)*sizeof(element));
+	if (alloced_col < (*ncols)+1) (*mat) = (element*) realloc((*mat), ((*ncols)+1)*sizeof(element));
 	free(line);
 
 	line = NULL;
-	(*row) = 1;
+	(*nrows) = 1;
 	while (getline(&line, &linesize, mat_file) != -1){
-		while ((*row) >= alloced_row){
+		while ((*nrows) >= alloced_row){
 			alloced_row*=2;
 			mat = (element**) realloc(mat, alloced_row*sizeof(element*));
 		}
-		mat[(*row)] = (element*) malloc(((*col)+1)*sizeof(element));
+		mat[(*nrows)] = (element*) malloc(((*ncols)+1)*sizeof(element));
 
 		int cur_col = 0;
 		aux_str = strtok(line, DELIMITERS);
 		while(aux_str != NULL) {
-			sscanf(aux_str, "%lf", mat[(*row)] + (cur_col++));
+			sscanf(aux_str, "%lf", mat[(*nrows)] + (cur_col++));
 			aux_str = strtok(NULL, DELIMITERS);
 		}
 
-		(*row)++;
+		(*nrows)++;
 		free(line);
 		line = NULL;
 	}
@@ -111,39 +111,78 @@ element ** read_mat(char * filename, int * row, int * col) {
 	return mat;
 }
 
-void print_mat(element ** mat, int row, int col) {
+void print_mat(element ** mat, int nrows, int ncols) {
 	int i, j;
-	for (i=0; i<row; i++){
-		for (j=0; j<col; j++) printf("%.3lf ", mat[i][j]);
+	for (i=0; i<nrows; i++){
+		for (j=0; j<ncols; j++) printf("%.3lf ", mat[i][j]);
 		printf("\n");
 	}
 }
 
-void free_mat(element ** mat, int row) {
+void free_mat(element ** mat, int nrows) {
 	int i;
-	for (i=0; i<row; i++) free(mat[i]);
+	for (i=0; i<nrows; i++) free(mat[i]);
 	free(mat);
 }
 
 
 
-void append_col(element ** mat, int mrow, int * mcol, element * vect) {
+void append_col(element ** mat, int nrows, int * ncols, element * vect) {
 	int i;
-	for (i=0; i<mrow; i++) mat[i][(*mcol)] = vect[i];
-	(*mcol)++;
+	for (i=0; i<nrows; i++) mat[i][(*ncols)] = vect[i];
+	(*ncols)++;
+}
+
+
+
+int sequential_max_line(element ** mat, int nrows, int col) {
+	int i, max_idx = -1;
+	element max = -1, mod;
+	for (i=0; i<nrows; i++){
+		mod = (mat[i][col] >= 0) ? mat[i][col] : -mat[i][col];
+		if (mod > max){
+			max = mod;
+			max_idx = i;
+		}
+	}
+
+	return max_idx;
+}
+
+element * seuquential_gaussjordan(element ** mat, int nrows, int ncols) {
+	ncols--;
+	int i, j, k, min = (ncols <= nrows) ? ncols : nrows;
+	for (j=0; j<min; j++){
+		int max_idx = sequential_max_line(mat, nrows, j);
+		element * aux_row = mat[j];
+		mat[j] = mat[max_idx];
+		mat[max_idx] = aux_row;
+
+		for (i=0; i<nrows; i++){
+			if (i!=j){
+				element rat = mat[i][j]/mat[j][j];
+				for (k=0; k<ncols+1; k++) mat[i][k] -= rat*mat[j][k];
+			}
+		}
+	}
+
+	element * res = (element*) malloc(nrows*sizeof(element));
+	for (i=0; i<nrows; i++) res[i] = mat[i][ncols]/mat[i][i];
+
+	return res;
 }
 
 
 
 int main (int argc, char * argv[]) {
-	int vrow, mrow, mcol;
-	element ** mat = read_mat(MATRIX_FILE, &mrow, &mcol);
-	element * vect = read_vect(VECTOR_FILE, &vrow);
-	append_col(mat, mrow, &mcol, vect);
+	int vnrows, mnrows, mncols;
+	element ** mat = read_mat(MATRIX_FILE, &mnrows, &mncols);
+	element * vect = read_vect(VECTOR_FILE, &vnrows);
+	append_col(mat, mnrows, &mncols, vect);
 	free(vect);
 
-	print_vect(vect, vrow);
-	print_mat(mat, mrow, mcol);
+	element * res = seuquential_gaussjordan(mat, mnrows, mncols);
+	print_vect(res, mnrows);
 /*
 	int order;
 	int my_rank = -1;
@@ -170,6 +209,6 @@ int main (int argc, char * argv[]) {
 
 	MPI_Finalize();*/
 
-	free_mat(mat, mrow);
+	free_mat(mat, mnrows);
 	return EXIT_SUCCESS;
 }
