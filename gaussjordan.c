@@ -254,43 +254,45 @@ element ** recv_initial_lines(int * nrows, int * ncols, int * job_size, int ** j
 	return mat;
 }
 
-void send_final_answer(element ** mat, int nrows, int ncols, int job_size, int * job_lines_idxs, int * init_tag)
+void send_final_answer(element ** mat, int ncols, int job_size, int * job_lines_idxs, int * init_tag)
 {
-	MPI_Gather(&job_size, 1, MPI_INT, NULL, 1, MPI_INT, 0, MPI_COMM_WORLD);
-	MPI_Send(job_lines_idxs, job_size, MPI_INT, 0, 7654737, MPI_COMM_WORLD);
-int j;
-for (j=0; j<job_size; j++) printf("%d\n", job_lines_idxs[j]);
 	int i;
-	for (i=0; i<job_size; i++) MPI_Send(mat[i] + ncols, 1, ELEMENT_MPI, 0, (*init_tag)+1, MPI_COMM_WORLD);
+	element * res = (element*) malloc(job_size*sizeof(element));
+	for (i=0; i<job_size; i++) res[i] = mat[i][ncols];
+
+	MPI_Send(job_lines_idxs, job_size, MPI_INT, 0, (*init_tag), MPI_COMM_WORLD);
+	MPI_Send(res, job_size, ELEMENT_MPI, 0, (*init_tag)+1, MPI_COMM_WORLD);
+	(*init_tag)+=1;
+	free(res);
 }
 
-element * recv_final_answer(element ** mat, int nrows, int ncols, int job_size, int nproc, int * init_tag)
+element * recv_final_answer(int nrows, int nproc,  int * init_tag)
 {
+	int i, j, aux_size = (nrows / nproc);
+	int * sizes = (int*) malloc((nproc-1)*sizeof(int));
+	for (i=0; i<nproc-1; i++){
+		if (i==nproc-2) aux_size += (nrows % nproc);
+		sizes[i] = aux_size;
+	}
+	
 	MPI_Status status;
-	int * sizes = (int*) malloc(nproc*sizeof(int));
-	MPI_Gather(&job_size, 1, MPI_INT, sizes, 1, MPI_INT, 0, MPI_COMM_WORLD);
-
-	int i, j;
-	int ** idxs = (int**) malloc(nproc*sizeof(int*));
-	for (i=1; i<nproc; i++){
+	int ** idxs = (int**) malloc((nproc-1)*sizeof(int*));
+	for (i=0; i<nproc-1; i++){
 		idxs[i] = (int*) malloc(sizes[i]*sizeof(int));
-		MPI_Recv(idxs[i], sizes[i], MPI_INT, i, 7654737, MPI_COMM_WORLD, &status);
-		for (j=0; j<sizes[i]; j++) printf("%d\n", idxs[i][j]);
+		MPI_Recv(idxs[i], sizes[i], MPI_INT, i+1, (*init_tag), MPI_COMM_WORLD, &status);
 	}
 
-	int max_size = 0;
-	for (i=1; i<nproc; i++) if (sizes[i]>max_size) max_size = sizes[i];
-	element * aux_vect = (element*) malloc(max_size*sizeof(element));
+	element * aux_vect = (element*) malloc(aux_size*sizeof(element));
 	element * res = (element*) malloc(nrows*sizeof(element));
-	for (i=1; i<nproc; i++){
-		for (j=0; j<sizes[i]; j++) MPI_Recv(aux_vect + i, 1, ELEMENT_MPI, i, (*init_tag)+1, MPI_COMM_WORLD, &status);
-		//printf("%d\n", idxs[i][j]);
+	for (i=0; i<nproc-1; i++){
+		MPI_Recv(aux_vect, sizes[i], ELEMENT_MPI, i+1, (*init_tag)+1, MPI_COMM_WORLD, &status);
 		for (j=0; j<sizes[i]; j++) res[idxs[i][j]] = aux_vect[j];
 	}
-		
-	// /for (j=0; j<nrows; j++) printf("%.3lf\n", res[j]);
+	(*init_tag)+=1;
 
-	free_mat(idxs, nproc);
+	//free_mat(idxs, nproc-1);
+	free(aux_vect);
+	free(sizes);
 	return res;
 }
 
@@ -367,12 +369,12 @@ element * parallel_gaussjordan(element ** mat, int nrows, int ncols, int job_siz
 	}
 
 	if (rank == 0){
-		element * res = recv_final_answer(mat, nrows, ncols, job_size, nproc, init_tag);
+		element * res = recv_final_answer(nrows, nproc, init_tag);
 		for (i=0; i<job_size; i++) res[job_lines_idxs[i]] = mat[i][ncols];
 		return res;
 	}
 	else{
-		send_final_answer(mat, nrows, ncols, job_size, job_lines_idxs, init_tag);
+		send_final_answer(mat, ncols, job_size, job_lines_idxs, init_tag);
 		return NULL;
 	}
 }
@@ -406,7 +408,7 @@ int main (int argc, char * argv[])
 
 	element * res = parallel_gaussjordan(mat, nrows, ncols, job_size, job_lines_idxs, nproc, rank, &msgtag);
 	if (rank == 0){
-		//print_vect("stdout", res, nrows);
+		print_vect("stdout", res, nrows);
 		free(res);
 	}
 	
