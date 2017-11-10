@@ -1,16 +1,16 @@
 all:
-	mpicc gaussjordan.c -fopenmp -O3 -o gaussjordan.out
+	mpicc gaussjordan.c -Wall -Wextra -fopenmp -O3 -o gaussjordan.out
 
 clean:
 	rm *.out
 	
 run:
-	mpirun ./gaussjordan.out
+	mpirun ./gaussjordan.out -np 8
 
 test:
-	mpicc gaussjordan.c -Wall -Wextra -g -fopenmp -o gaussjordan.out
-	mpirun ./gaussjordan.out
+	mpicc gaussjordan.c -Wall -Wextra -fopenmp -o gaussjordan.out -g
+	mpirun ./gaussjordan.out -np 8
 
 val:
-	mpicc gaussjordan.c -Wall -Wextra -g -fopenmp -o gaussjordan.out
-	valgrind --leak-check=full --track-origins=yes ./gaussjordan.out
+	mpicc gaussjordan.c -Wall -Wextra -fopenmp -o gaussjordan.out -g
+	valgrind --leak-check=full --track-origins=yes mpirun ./gaussjordan.out -np 8
