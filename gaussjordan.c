@@ -1,17 +1,14 @@
 /*
 TRABALHO 2 DE PROGRAMACAO CONCORRENTE
 
-Alunos: 	Bernardo Barcellos de Castro Cunha,
-			Eduardo Santos Carlos de Souza,
-			Gustavo Cabral de Barros,
-			Piero Lima Capelo
+Alunos:
+Bernardo Barcellos de Castro Cunha	9293380
+Eduardo Santos Carlos de Souza	9293481
+Gustavo Cabral de Barros	9293028
+Piero Lima Capelo	9293115
 
-NUSP:		9293380,
-			9293481,
-			9293028,
-			9293115
-
-Professor: 	Paulo Sergio Lopes de Souza
+Professor:
+Paulo Sergio Lopes de Souza
 */
 
 #include <stdio.h>
@@ -30,7 +27,7 @@ Professor: 	Paulo Sergio Lopes de Souza
 typedef double element;
 #define ELEMENT_MPI MPI_DOUBLE
 #define ELEMENT_READ_MASK "%lf"
-#define ELEMENT_PRINT_MASK "%.3lf"
+#define ELEMENT_PRINT_MASK "%.3lf\n"
 
 #define MOD(n) (((n) >= 0) ? (n) : (-(n)))
 
@@ -61,30 +58,17 @@ element * read_vect(char * filename, int * nrows)
 	return vect;
 }
 
-FILE * open_out_file(char * filename)
+void print_vect(char * filename, element * vect, int nrows)
 {
 	FILE * out_file;
 	if (strcmp("stdout", filename) == 0) out_file = stdout;
 	else if (strcmp("stderr", filename) == 0) out_file = stderr;
 	else out_file = fopen(filename, "w");
 
-	return out_file;
-}
-
-void close_out_file(FILE * out_file)
-{
-	if ((out_file != stdout) && (out_file != stderr)) fclose(out_file);
-}
-
-void print_vect(char * filename, element * vect, int nrows)
-{
-	FILE * out_file = open_out_file(filename);
 	int i;
-	for (i=0; i<nrows; i++){
-		fprintf(out_file, ELEMENT_PRINT_MASK, vect[i]);
-		fprintf(out_file, "\n");
-	}
-	close_out_file(out_file);
+	for (i=0; i<nrows; i++) fprintf(out_file, ELEMENT_PRINT_MASK, vect[i]);
+	
+	if ((out_file != stdout) && (out_file != stderr)) fclose(out_file);
 }
 
 
@@ -139,21 +123,7 @@ element ** read_mat(char * filename, int * nrows, int * ncols)
 	return mat;
 }
 
-void print_mat(char * filename, element ** mat, int nrows, int ncols)
-{	
-	FILE * out_file = open_out_file(filename);
-	int i, j;
-	for (i=0; i<nrows; i++){
-		for(j=0; j<ncols; j++){ 
-			fprintf(out_file, ELEMENT_PRINT_MASK, mat[i][j]);
-			fprintf(out_file, " ");
-		}
-		fprintf(out_file, "\n");
-	}
-	close_out_file(out_file);
-}
-
-void free_mat(element ** mat, int nrows)
+void free_mat(void ** mat, int nrows)
 {
 	int i;
 	for (i=0; i<nrows; i++) free(mat[i]);
@@ -169,42 +139,32 @@ void append_col(element ** mat, int nrows, int * ncols, element * col)
 
 
 
-int max_line(element ** mat, int nrows, int col, char omp)
-{
-	int i, max_idx = -1;
-	element max = -1, mod;
-	if (!omp){
-		for (i=0; i<nrows; i++){
-			mod = (mat[i][col] >= 0) ? mat[i][col] : -mat[i][col];
-			if (mod > max){
-				max = mod;
-				max_idx = i;
-			}
-		}
-	}
-	else{
-
-	}
-
-	return max_idx;
-}
-
 element * sequential_gaussjordan(element ** mat, int nrows, int ncols)
 {
 	ncols--;
-	int i, j, k, min = (ncols <= nrows) ? ncols : nrows;
+	int i, j, k, max_idx, min = (ncols <= nrows) ? ncols : nrows;
+	element max;
 	for (j=0; j<min; j++){
-		int max_idx = max_line(mat, nrows, j, 0);
+		max_idx = -1;
+		max = 0;
+		for (i=j; i<nrows; i++){
+			if (MOD(mat[i][j]) > MOD(max)){
+				max = mat[i][j];
+				max_idx = i;
+			}
+		}
 		element * aux_row = mat[j];
 		mat[j] = mat[max_idx];
 		mat[max_idx] = aux_row;
 
+		ncols++;
 		for (i=0; i<nrows; i++){
 			if (i!=j){
 				element rat = mat[i][j]/mat[j][j];
-				for (k=0; k<ncols+1; k++) mat[i][k] -= rat*mat[j][k];
+				for (k=0; k<ncols; k++) mat[i][k] -= rat*mat[j][k];
 			}
 		}
+		ncols--;
 	}
 
 	element * res = (element*) malloc(nrows*sizeof(element));
@@ -290,34 +250,45 @@ element * recv_final_answer(int nrows, int nproc,  int * init_tag)
 	}
 	(*init_tag)+=1;
 
-	//free_mat(idxs, nproc-1);
+	free_mat((void**)idxs, nproc-1);
 	free(aux_vect);
 	free(sizes);
 	return res;
 }
 
-
-
-element * parallel_gaussjordan(element ** mat, int nrows, int ncols, int job_size, int * job_lines_idxs, int nproc, int rank, int * init_tag)
+element * parallel_gaussjordan(element ** mat, int nrows, int ncols, int job_size, int * job_lines_idxs, int nproc, int rank, int * init_tag, int n_threads)
 {
 	ncols--;
 	int i, j, k, min = (ncols <= nrows) ? ncols : nrows;
 	int local_max_idx, global_max_idx, global_max_proc;
-	int * recv_idx;
+	int * recv_idx, * aux_max_idx_vect = (int*) malloc(n_threads*sizeof(int));
 	element local_max, global_max;
-	element * global_max_line = (element*) malloc((ncols+1)*sizeof(element)), * recv_max;
+	element * global_max_line = (element*) malloc((ncols+1)*sizeof(element)), * recv_max, * aux_max_vect = (element*) malloc(n_threads*sizeof(element));;
 	if (rank==0){
 		recv_idx = (int*) malloc(nproc*sizeof(int));
 		recv_max = (element*) malloc(nproc*sizeof(element));
 	}
 
+	omp_set_dynamic(0);
+	omp_set_num_threads(n_threads);
 	for (j=0; j<min; j++){
 		local_max = 0;
 		local_max_idx = -1;
-		for (i=0; i<job_size; i++){
-			if ((job_lines_idxs[i] >= j) && (MOD(mat[i][j]) > MOD(local_max))){
-					local_max = mat[i][j];
-					local_max_idx = i;
+		#pragma omp parallel for private(i)
+		for (i=0; i<job_size; i++)
+		{
+			int id = omp_get_thread_num();
+			aux_max_idx_vect[id] = -1;
+			aux_max_vect[id] = 0;
+			if ((job_lines_idxs[i] >= j) && (MOD(mat[i][j]) > MOD(aux_max_vect[id]))){
+				aux_max_vect[id] = mat[i][j];
+				aux_max_idx_vect[id] = i;
+			}
+		}
+		for (i=0; i<n_threads; i++){
+			if (MOD(aux_max_vect[i]) > MOD(local_max)){
+				local_max = aux_max_vect[i];
+				local_max_idx = aux_max_idx_vect[i];
 			}
 		}
 
@@ -340,8 +311,11 @@ element * parallel_gaussjordan(element ** mat, int nrows, int ncols, int job_siz
 		MPI_Bcast(&global_max_idx, 1, MPI_INT, 0, MPI_COMM_WORLD);
 		MPI_Bcast(&global_max_proc, 1, MPI_INT, 0, MPI_COMM_WORLD);
 
-		//Paralelizar
-		for (i=0; i<job_size; i++) if (job_lines_idxs[i]==j) job_lines_idxs[i] = global_max_idx;
+		//#pragma omp parallel for shared(found) private(i)
+		for (i=0; i<job_size; i++)
+		{
+			if (job_lines_idxs[i]==j) job_lines_idxs[i] = global_max_idx;
+		}
 		if (rank == global_max_proc){
 			job_lines_idxs[local_max_idx] = j;
 			memcpy(global_max_line, mat[local_max_idx], (ncols+1)*sizeof(element));
@@ -350,7 +324,9 @@ element * parallel_gaussjordan(element ** mat, int nrows, int ncols, int job_siz
 		MPI_Bcast(global_max_line, ncols+1, ELEMENT_MPI, global_max_proc, MPI_COMM_WORLD);
 
 		ncols++;
-		for (i=0; i<job_size; i++){ //Paralelizar
+		#pragma omp parallel for private(i)
+		for (i=0; i<job_size; i++)
+		{
 			if (job_lines_idxs[i] != j){
 				element rat = mat[i][j]/global_max;
 				for (k=0; k<ncols; k++) mat[i][k] -= rat*global_max_line[k];
@@ -360,8 +336,14 @@ element * parallel_gaussjordan(element ** mat, int nrows, int ncols, int job_siz
 
 		MPI_Barrier(MPI_COMM_WORLD);
 	}
-	for (i=0; i<job_size; i++) mat[i][ncols]/=mat[i][job_lines_idxs[i]];
+	#pragma omp parallel for private(i)
+	for (i=0; i<job_size; i++)
+	{
+		mat[i][ncols] /= mat[i][job_lines_idxs[i]];
+	}
 
+	free(aux_max_idx_vect);
+	free(aux_max_vect);
 	free(global_max_line);
 	if (rank==0){
 		free(recv_idx);
@@ -378,6 +360,7 @@ element * parallel_gaussjordan(element ** mat, int nrows, int ncols, int job_siz
 		return NULL;
 	}
 }
+
 
 
 int main (int argc, char * argv[])
@@ -406,14 +389,14 @@ int main (int argc, char * argv[])
 	}
 	else mat = recv_initial_lines(&nrows, &ncols, &job_size, &job_lines_idxs, &msgtag);
 
-	element * res = parallel_gaussjordan(mat, nrows, ncols, job_size, job_lines_idxs, nproc, rank, &msgtag);
+	element * res = parallel_gaussjordan(mat, nrows, ncols, job_size, job_lines_idxs, nproc, rank, &msgtag, 4);
 	if (rank == 0){
 		print_vect("stdout", res, nrows);
 		free(res);
 	}
 	
 	free(job_lines_idxs);
-	free_mat(mat, ((rank==0) ? nrows : job_size));
+	free_mat((void**)mat, ((rank==0) ? nrows : job_size));
 	MPI_Finalize();
 	return 0;
 }
