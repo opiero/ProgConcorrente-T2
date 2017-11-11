@@ -17,8 +17,8 @@ Paulo Sergio Lopes de Souza
 #include <omp.h>
 #include <mpi.h>
 
-#define MATRIX_FILE "matriz1000.txt"
-#define VECTOR_FILE "vetor1000.txt"
+#define MATRIX_FILE "matriz.txt"
+#define VECTOR_FILE "vetor.txt"
 #define OUTPUT_FILE "resultado.txt"
 
 #define ALLOC_INIT_SIZE 8 //Nao pode ser < 0
@@ -207,7 +207,7 @@ element * sequential_gaussjordan(element ** mat, int nrows, int ncols)
 		todos os elementos da coluna menos a diagonal principal
 		*/
 		for (i=0; i<nrows; i++){
-			if (i!=j){
+			if (i != j){
 				rat = mat[i][j] / mat[j][j];
 				for (k=0; k<ncols; k++) mat[i][k] -= rat*mat[j][k];
 			}
@@ -219,7 +219,7 @@ element * sequential_gaussjordan(element ** mat, int nrows, int ncols)
 	pelos coeficientes na diagonal principal
 	*/
 	element * res = (element*) malloc(nrows*sizeof(element));
-	for (i=0; i<nrows; i++) res[i] = mat[i][ncols] / mat[i][i];
+	for (i=0; i<nrows; i++) res[i] = mat[i][ncols-1] / mat[i][i];
 
 	return res;
 }
@@ -438,15 +438,29 @@ element * parallel_gaussjordan(element ** mat, int nrows, int ncols, int job_siz
 
 
 
+/*
+Imprime o tempo decorrido do processo no arquivo filename
+*/
+void print_time(char * filename, double elap_time)
+{
+	FILE * time_file = open_file(filename, "a");
+	fprintf(time_file, "%lf\n", elap_time);
+	close_file(time_file);
+}
+
+
+
 int main (int argc, char * argv[])
 {
 	//Variaveis necesarias para todos os processos
-	int nrows, ncols, job_size;
-	int * job_lines_idxs;
+	int nrows = 0, ncols = 0, job_size = 0, n_threads = 1;
+	int * job_lines_idxs = NULL;
+	element * res = NULL;
 	element ** mat = NULL;
+	double elap_time = 0;
 
 	//Variaveis para o OpenMPI necesarias para todos os processos
-	int rank, msgtag = 0, nproc;
+	int rank = 0, msgtag = 0, nproc = 1;
 	MPI_Init(&argc, &argv);
 	MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 	MPI_Comm_size(MPI_COMM_WORLD, &nproc);
@@ -460,25 +474,44 @@ int main (int argc, char * argv[])
 		free(vect);
 	}
 
-	
-	//Atribuicao das linhas para cada processo
-	assign_initial_lines(&nrows, &ncols, &job_size, &job_lines_idxs, rank, nproc);
-	//Passagem das linhas das matrizes para os procesos apropriados
-	if (rank == 0) send_initial_lines(mat, nrows, ncols, nproc, &msgtag);
-	else mat = recv_initial_lines(ncols, job_size, &msgtag);
-
-	/*
-	Cada processo realiza suas operacoes do gauss-jordan, e para 
-	o processo 0 e retornado o vetor com as respostas
-	*/
-	element * res = parallel_gaussjordan(mat, nrows, ncols, job_size, job_lines_idxs, nproc, rank, &msgtag, 1);
-	if (rank == 0){
-		print_vect(OUTPUT_FILE, res, nrows);
-		free(res);
+	if (atoi(argv[2]) == 1){
+		if (rank==0){
+			elap_time = omp_get_wtime();
+			res = sequential_gaussjordan(mat, nrows, ncols);
+			elap_time = omp_get_wtime() - elap_time;
+			print_vect(OUTPUT_FILE, res, nrows);
+			print_time(argv[4], elap_time);
+			free(res);
+			free_mat((void**)mat, nrows);
+		}
 	}
-	
-	free(job_lines_idxs);
-	free_mat((void**)mat, ((rank==0) ? nrows : job_size));
+	else{
+		//Definicao do numero de threads e armazenamento do tempo inicial
+		n_threads = atoi(argv[3]);
+		if (rank==0) elap_time = omp_get_wtime();
+
+		//Atribuicao das linhas para cada processo
+		assign_initial_lines(&nrows, &ncols, &job_size, &job_lines_idxs, rank, nproc);
+		//Passagem das linhas das matrizes para os procesos apropriados
+		if (rank == 0) send_initial_lines(mat, nrows, ncols, nproc, &msgtag);
+		else mat = recv_initial_lines(ncols, job_size, &msgtag);
+
+		/*
+		Cada processo realiza suas operacoes do gauss-jordan, e para 
+		o processo 0 e retornado o vetor com as respostas
+		*/
+		res = parallel_gaussjordan(mat, nrows, ncols, job_size, job_lines_idxs, nproc, rank, &msgtag, n_threads);
+		if (rank == 0){
+			elap_time = omp_get_wtime() - elap_time;
+			print_vect(OUTPUT_FILE, res, nrows);
+			print_time(argv[4], elap_time);
+			free(res);
+		}
+		
+		free(job_lines_idxs);
+		free_mat((void**)mat, ((rank==0) ? nrows : job_size));
+	}
+
 	MPI_Finalize();
 	return 0;
 }
