@@ -263,7 +263,7 @@ element * parallel_gaussjordan(element ** mat, int nrows, int ncols, int job_siz
 	int local_max_idx, global_max_idx, global_max_proc;
 	int * recv_idx, * aux_max_idx_vect = (int*) malloc(n_threads*sizeof(int));
 	element local_max, global_max;
-	element * global_max_line = (element*) malloc((ncols+1)*sizeof(element)), * recv_max, * aux_max_vect = (element*) malloc(n_threads*sizeof(element));;
+	element * global_max_line = (element*) malloc((ncols+1)*sizeof(element)), * recv_max, * aux_max_vect = (element*) malloc(n_threads*sizeof(element));
 	if (rank==0){
 		recv_idx = (int*) malloc(nproc*sizeof(int));
 		recv_max = (element*) malloc(nproc*sizeof(element));
@@ -274,19 +274,19 @@ element * parallel_gaussjordan(element ** mat, int nrows, int ncols, int job_siz
 	for (j=0; j<min; j++){
 		local_max = 0;
 		local_max_idx = -1;
-		#pragma omp parallel for private(i)
+		memset(aux_max_vect, 0, n_threads*sizeof(element));
+		memset(aux_max_idx_vect, -1, n_threads*sizeof(int));
+		#pragma omp parallel for shared(aux_max_vect, aux_max_idx_vect) private(i)
 		for (i=0; i<job_size; i++)
 		{
 			int id = omp_get_thread_num();
-			aux_max_idx_vect[id] = -1;
-			aux_max_vect[id] = 0;
 			if ((job_lines_idxs[i] >= j) && (MOD(mat[i][j]) > MOD(aux_max_vect[id]))){
 				aux_max_vect[id] = mat[i][j];
 				aux_max_idx_vect[id] = i;
 			}
 		}
 		for (i=0; i<n_threads; i++){
-			if (MOD(aux_max_vect[i]) > MOD(local_max)){
+			if (MOD(aux_max_vect[i]) >= MOD(local_max)){
 				local_max = aux_max_vect[i];
 				local_max_idx = aux_max_idx_vect[i];
 			}
@@ -298,7 +298,7 @@ element * parallel_gaussjordan(element ** mat, int nrows, int ncols, int job_siz
 		if (rank==0){
 			global_max = 0;
 			global_max_proc = global_max_idx = -1;
-			for (k=0; k<nproc; k++){ //Nao precisa paralelizar
+			for (k=0; k<nproc; k++){
 				if (MOD(recv_max[k]) > MOD(global_max)) {
 					global_max = recv_max[k];
 					global_max_idx = recv_idx[k];
@@ -311,7 +311,7 @@ element * parallel_gaussjordan(element ** mat, int nrows, int ncols, int job_siz
 		MPI_Bcast(&global_max_idx, 1, MPI_INT, 0, MPI_COMM_WORLD);
 		MPI_Bcast(&global_max_proc, 1, MPI_INT, 0, MPI_COMM_WORLD);
 
-		//#pragma omp parallel for shared(found) private(i)
+		#pragma omp parallel for private(i)
 		for (i=0; i<job_size; i++)
 		{
 			if (job_lines_idxs[i]==j) job_lines_idxs[i] = global_max_idx;
@@ -321,6 +321,7 @@ element * parallel_gaussjordan(element ** mat, int nrows, int ncols, int job_siz
 			memcpy(global_max_line, mat[local_max_idx], (ncols+1)*sizeof(element));
 		}
 
+		//printf("%d\n", global_max_proc);
 		MPI_Bcast(global_max_line, ncols+1, ELEMENT_MPI, global_max_proc, MPI_COMM_WORLD);
 
 		ncols++;
@@ -389,7 +390,7 @@ int main (int argc, char * argv[])
 	}
 	else mat = recv_initial_lines(&nrows, &ncols, &job_size, &job_lines_idxs, &msgtag);
 
-	element * res = parallel_gaussjordan(mat, nrows, ncols, job_size, job_lines_idxs, nproc, rank, &msgtag, 4);
+	element * res = parallel_gaussjordan(mat, nrows, ncols, job_size, job_lines_idxs, nproc, rank, &msgtag, 1);
 	if (rank == 0){
 		print_vect("stdout", res, nrows);
 		free(res);
