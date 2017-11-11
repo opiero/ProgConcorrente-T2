@@ -33,6 +33,30 @@ typedef double element;
 
 
 
+/*
+Funcao abre o arquivo verificando se não é stdin, stdout ou stderr
+*/
+FILE * open_file(char * filename, const char * mode)
+{
+	FILE * file;
+	if (strcmp("stdout", filename) == 0) file = stdout;
+	else if (strcmp("stderr", filename) == 0) file = stderr;
+	else if (strcmp("stdein", filename) == 0) file = stdein;
+	else file = fopen(filename, mode);
+
+	return file;
+}
+
+/*
+Funcao fecha o arquivo verificando se não é stdin, stdout ou stderr
+*/
+void close_file(FILE * file)
+{
+	if ((file != stdout) && (file != stderr) && (file != stdin)) fclose(out_file);
+}
+
+
+
 element * read_vect(char * filename, int * nrows)
 {
 	(*nrows) = 0;
@@ -41,7 +65,7 @@ element * read_vect(char * filename, int * nrows)
 
 	size_t linesize = 0;
 	char * line = NULL;
-	FILE * vect_file = fopen(filename, "r");
+	FILE * vect_file = open_file(filename, "r");
 	while(getline(&line, &linesize, vect_file) != -1){
 		while ((*nrows) >= alloced_row){
 			alloced_row*=2;
@@ -53,22 +77,21 @@ element * read_vect(char * filename, int * nrows)
 		line = NULL;
 	}
 	free(line);
-	fclose(vect_file);
+	close_file(vect_file);
 
 	return vect;
 }
 
+/*
+Funcao printa o vetor coluna de elementos no arquivo com nome filename
+*/
 void print_vect(char * filename, element * vect, int nrows)
 {
-	FILE * out_file;
-	if (strcmp("stdout", filename) == 0) out_file = stdout;
-	else if (strcmp("stderr", filename) == 0) out_file = stderr;
-	else out_file = fopen(filename, "w");
-
 	int i;
+	FILE * out_file = open_file(filename, "w");
+	//Imprime cada elemento da matriz como uma linha
 	for (i=0; i<nrows; i++) fprintf(out_file, ELEMENT_PRINT_MASK, vect[i]);
-	
-	if ((out_file != stdout) && (out_file != stderr)) fclose(out_file);
+	close_file(out_file);
 }
 
 
@@ -82,7 +105,7 @@ element ** read_mat(char * filename, int * nrows, int * ncols)
 
 	size_t linesize = 0;
 	char * line = NULL;
-	FILE * mat_file = fopen(filename, "r");
+	FILE * mat_file = open_file(filename, "r");
 	if (getline(&line, &linesize, mat_file) == -1) printf("No lines on file\n");
 	char * aux_str = strtok(line, DELIMITERS);
 	while(aux_str != NULL){
@@ -118,11 +141,14 @@ element ** read_mat(char * filename, int * nrows, int * ncols)
 		line = NULL;
 	}
 	free(line);
-	fclose(mat_file);
+	close_file(mat_file);
 
 	return mat;
 }
 
+/*
+Libera da heap uma matriz generica
+*/
 void free_mat(void ** mat, int nrows)
 {
 	int i;
@@ -130,6 +156,11 @@ void free_mat(void ** mat, int nrows)
 	free(mat);
 }
 
+/*
+Adiciona uma coluna col na matriz mat, e incremeneta
+o numero de colunas da matriz. A mariz ja deve possuir a
+memeoria necessaria alocada
+*/
 void append_col(element ** mat, int nrows, int * ncols, element * col)
 {
 	int i;
@@ -139,12 +170,24 @@ void append_col(element ** mat, int nrows, int * ncols, element * col)
 
 
 
+/*
+Realiza o algoritimo de gaussjordan utilizando apenas
+uma maquina e uma thread, sequencialemnet. Retorna o vetor
+resposta com o valor das variaveis. Aceita matrizes nao-quadradas.
+*/
 element * sequential_gaussjordan(element ** mat, int nrows, int ncols)
 {
-	ncols--;
-	int i, j, k, max_idx, min = (ncols <= nrows) ? ncols : nrows;
-	element max;
+	//ncols-1 para desconsiderar a ultima coluna, que e a coluna com os vator resultado
+	int i, j, k, max_idx, min = ((ncols-1) <= nrows) ? (ncols-1) : nrows;
+	element max, rat;
+	element * aux_row;
 	for (j=0; j<min; j++){
+		/*
+		Pega o elemento com maior valor em modulo na coluna para reduzir erro numerico.
+		Depois troca a linha desse elemento com a linha da coluna da iteracao atual.
+		Desconsidera as linhas das iteracoes anteriores porque elas nao podem ser utilizadas,
+		ja que elas mudariam os valores das posicoes ja zeradas.
+		*/
 		max_idx = -1;
 		max = 0;
 		for (i=j; i<nrows; i++){
@@ -153,22 +196,29 @@ element * sequential_gaussjordan(element ** mat, int nrows, int ncols)
 				max_idx = i;
 			}
 		}
-		element * aux_row = mat[j];
+		aux_row = mat[j];
 		mat[j] = mat[max_idx];
 		mat[max_idx] = aux_row;
 
-		ncols++;
+		/*
+		Para todas as linhas menos a da iteracao atual e feita
+		a multiplicacao e soma das linhascom o objetivo de zerar
+		todos os elementos da coluna menos a diagonal principal
+		*/
 		for (i=0; i<nrows; i++){
 			if (i!=j){
-				element rat = mat[i][j]/mat[j][j];
+				rat = mat[i][j] / mat[j][j];
 				for (k=0; k<ncols; k++) mat[i][k] -= rat*mat[j][k];
 			}
 		}
-		ncols--;
 	}
 
+	/*
+	Calcular o vetor resposta dividindo a ultima coluna (coluna b em Ax = b)
+	pelos coeficientes na diagonal principal
+	*/
 	element * res = (element*) malloc(nrows*sizeof(element));
-	for (i=0; i<nrows; i++) res[i] = mat[i][ncols]/mat[i][i];
+	for (i=0; i<nrows; i++) res[i] = mat[i][ncols] / mat[i][i];
 
 	return res;
 }
@@ -366,18 +416,22 @@ element * parallel_gaussjordan(element ** mat, int nrows, int ncols, int job_siz
 
 int main (int argc, char * argv[])
 {
+	//Variaveis necesarias para todos os processos
 	int nrows, ncols, job_size;
 	int * job_lines_idxs;
 	element ** mat;
 
+	//Variaveis para o OpenMPI necesarias para todos os processos
 	int rank, msgtag = 0, nproc;
 	MPI_Init(&argc, &argv);
 	MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 	MPI_Comm_size(MPI_COMM_WORLD, &nproc);
 	if (rank == 0) {
+		//Leitura do vetor e da matriz apenas no processo de rank 0
 		int vnrows;
 		element * vect = read_vect(VECTOR_FILE, &vnrows);
 		mat = read_mat(MATRIX_FILE, &nrows, &ncols);
+		//Adiciona o vetor lido como a ultima coluna da matriz para facilitar as operacoes
 		append_col(mat, nrows, &ncols, vect);
 		free(vect);
 
@@ -392,7 +446,7 @@ int main (int argc, char * argv[])
 
 	element * res = parallel_gaussjordan(mat, nrows, ncols, job_size, job_lines_idxs, nproc, rank, &msgtag, 1);
 	if (rank == 0){
-		print_vect("stdout", res, nrows);
+		print_vect(OUTPUT_FILE, res, nrows);
 		free(res);
 	}
 	
