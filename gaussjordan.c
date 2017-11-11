@@ -41,7 +41,7 @@ FILE * open_file(char * filename, const char * mode)
 	FILE * file;
 	if (strcmp("stdout", filename) == 0) file = stdout;
 	else if (strcmp("stderr", filename) == 0) file = stderr;
-	else if (strcmp("stdein", filename) == 0) file = stdein;
+	else if (strcmp("stdin", filename) == 0) file = stdin;
 	else file = fopen(filename, mode);
 
 	return file;
@@ -52,7 +52,8 @@ Funcao fecha o arquivo verificando se não é stdin, stdout ou stderr
 */
 void close_file(FILE * file)
 {
-	if ((file != stdout) && (file != stderr) && (file != stdin)) fclose(out_file);
+	if ((file != stdout) && (file != stderr) && (file != stdin))
+		fclose(file);
 }
 
 
@@ -114,7 +115,7 @@ element ** read_mat(char * filename, int * nrows, int * ncols)
 			(*mat) = (element*) realloc((*mat), alloced_col*sizeof(element));
 		}
 
-		sscanf(aux_str, ELEMENT_READ_MASK, (*mat) + ((*ncols)++));
+		if (sscanf(aux_str, ELEMENT_READ_MASK, (*mat) + (*ncols)) == 1) (*ncols)++;
 		aux_str = strtok(NULL, DELIMITERS);
 	}
 	if (alloced_col < (*ncols)+1) (*mat) = (element*) realloc((*mat), ((*ncols)+1)*sizeof(element));
@@ -225,44 +226,61 @@ element * sequential_gaussjordan(element ** mat, int nrows, int ncols)
 
 
 
-void send_initial_lines(element ** mat, int nrows, int ncols, int nproc, int * init_tag)
+/*
+Cada processo atribui quais linhas da matriz ele computara,
+baseado em seu rank
+*/
+void assign_initial_lines(int * nrows, int * ncols, int * job_size, int ** job_lines_idxs, int rank, int nproc)
 {
-	MPI_Bcast(&nrows, 1, MPI_INT, 0, MPI_COMM_WORLD);
-	MPI_Bcast(&ncols, 1, MPI_INT, 0, MPI_COMM_WORLD);
-
-	int * job_lines_idxs = (int*) malloc((nrows/nproc + nrows%nproc)*sizeof(int));
-	int i, j, job_size = nrows/nproc, last_job = job_size;
-	for (i=1; i<nproc; i++){
-		if (i==nproc-1) job_size += nrows%nproc;
-		for (j=last_job; j<last_job+job_size; j++) job_lines_idxs[j-last_job] = j;
-		last_job = j;
-
-		MPI_Send(&job_size, 1, MPI_INT, i, (*init_tag), MPI_COMM_WORLD);
-		MPI_Send(job_lines_idxs, job_size, MPI_INT, i, (*init_tag)+1, MPI_COMM_WORLD);
-		for (j=0; j<job_size; j++) MPI_Send(mat[job_lines_idxs[j]], ncols, ELEMENT_MPI, i, (*init_tag)+2, MPI_COMM_WORLD);
-	}
-	free(job_lines_idxs);
-	(*init_tag)+=2;
-}
-
-element ** recv_initial_lines(int * nrows, int * ncols, int * job_size, int ** job_lines_idxs, int * init_tag)
-{
-	MPI_Status status;
+	//Broadcas das dimensoes da matriz
 	MPI_Bcast(nrows, 1, MPI_INT, 0, MPI_COMM_WORLD);
 	MPI_Bcast(ncols, 1, MPI_INT, 0, MPI_COMM_WORLD);
 
-	int i;
-	MPI_Recv(job_size, 1, MPI_INT, 0, (*init_tag), MPI_COMM_WORLD, &status);
+	//Atribuicao inicial de quem tera cada linha. Obs: O vetor job_lines_idxs não fica constante
+	(*job_size) = (*nrows) / nproc;
+	int i, init_pos = rank * (*job_size);
+	if (rank == nproc-1) (*job_size) += (*nrows) % nproc;
 	(*job_lines_idxs) = (int*) malloc((*job_size)*sizeof(int));
-	element ** mat = (element**) malloc((*job_size)*sizeof(element*));
-	for (i=0; i<(*job_size); i++) mat[i] = (element*) malloc((*ncols)*sizeof(element));
+	for (i=init_pos; i<init_pos+(*job_size); i++) (*job_lines_idxs)[i-init_pos] = i;
+}
+
+/*
+Processo 0 envia as linhas corretas para os outrso processos
+*/
+void send_initial_lines(element ** mat, int nrows, int ncols, int nproc, int * init_tag)
+{	
+	//Cada iteracao atribui as linhas para o processo i
+	int i, j, job_size = nrows/nproc, last_iter;
+	for (i=1; i<nproc; i++){
+		last_iter = (i+1)*job_size;
+		//Aumentar o numero de linhas para o ultimo processo
+		if (i == nproc-1) last_iter += nrows % nproc;
+		//Enviar para o processo i todas sua linhas
+		for (j=i*job_size; j<last_iter; j++) MPI_Send(mat[j], ncols, ELEMENT_MPI, i, (*init_tag)+1, MPI_COMM_WORLD);
+	}
+
+	(*init_tag)+=1;
+}
+
+/*
+Os processos recebem do processo 0 as linhas que irao computar
+*/
+element ** recv_initial_lines(int ncols, int job_size, int * init_tag)
+{
+	int i;
+	MPI_Status status;
+	element ** mat = (element**) malloc(job_size*sizeof(element*));
+	//Aloca cada linha e recebe o vetor do processo 0 
+	for (i=0; i<job_size; i++){
+		mat[i] = (element*) malloc(ncols*sizeof(element));
+		MPI_Recv(mat[i], ncols, ELEMENT_MPI, 0, (*init_tag)+1, MPI_COMM_WORLD, &status);
+	}
 	
-	MPI_Recv((*job_lines_idxs), (*job_size), MPI_INT, 0, (*init_tag)+1, MPI_COMM_WORLD, &status);
-	for (i=0; i<(*job_size); i++) MPI_Recv(mat[i], (*ncols), ELEMENT_MPI, 0, (*init_tag)+2, MPI_COMM_WORLD, &status);
-	
-	(*init_tag)+=2;
+	(*init_tag)+=1;
 	return mat;
 }
+
+
 
 void send_final_answer(element ** mat, int ncols, int job_size, int * job_lines_idxs, int * init_tag)
 {
@@ -305,6 +323,8 @@ element * recv_final_answer(int nrows, int nproc,  int * init_tag)
 	free(sizes);
 	return res;
 }
+
+
 
 element * parallel_gaussjordan(element ** mat, int nrows, int ncols, int job_size, int * job_lines_idxs, int nproc, int rank, int * init_tag, int n_threads)
 {
@@ -434,16 +454,19 @@ int main (int argc, char * argv[])
 		//Adiciona o vetor lido como a ultima coluna da matriz para facilitar as operacoes
 		append_col(mat, nrows, &ncols, vect);
 		free(vect);
-
-		int i;
-		job_size = nrows/nproc;
-		job_lines_idxs = (int*) malloc(job_size*sizeof(int));
-		for (i=0; i<job_size; i++) job_lines_idxs[i] = i;
-
-		send_initial_lines(mat, nrows, ncols, nproc, &msgtag);
 	}
-	else mat = recv_initial_lines(&nrows, &ncols, &job_size, &job_lines_idxs, &msgtag);
 
+	
+	//Atribuicao das linhas para cada processo
+	assign_initial_lines(&nrows, &ncols, &job_size, &job_lines_idxs, rank, nproc);
+	//Passagem das linhas das matrizes para os procesos apropriados
+	if (rank == 0) send_initial_lines(mat, nrows, ncols, nproc, &msgtag);
+	else mat = recv_initial_lines(ncols, job_size, &msgtag);
+
+	/*
+	Cada processo realiza suas operacoes do gauss-jordan, e para 
+	o processo 0 e retornado o vetor com as respostas
+	*/
 	element * res = parallel_gaussjordan(mat, nrows, ncols, job_size, job_lines_idxs, nproc, rank, &msgtag, 1);
 	if (rank == 0){
 		print_vect(OUTPUT_FILE, res, nrows);
