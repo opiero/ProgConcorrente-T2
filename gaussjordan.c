@@ -473,21 +473,21 @@ int main (int argc, char * argv[])
 		append_col(mat, nrows, &ncols, vect);
 		free(vect);
 	}
-
-	if (atoi(argv[2]) == 1){
+	
+	if (nproc == 1){
 		if (rank==0){
 			elap_time = omp_get_wtime();
 			res = sequential_gaussjordan(mat, nrows, ncols);
 			elap_time = omp_get_wtime() - elap_time;
 			print_vect(OUTPUT_FILE, res, nrows);
-			print_time(argv[4], elap_time);
+			print_time(argv[2], elap_time);
 			free(res);
 			free_mat((void**)mat, nrows);
 		}
 	}
 	else{
 		//Definicao do numero de threads e armazenamento do tempo inicial
-		n_threads = atoi(argv[3]);
+		n_threads = atoi(argv[1]);
 		if (rank==0) elap_time = omp_get_wtime();
 
 		//Atribuicao das linhas para cada processo
@@ -504,7 +504,7 @@ int main (int argc, char * argv[])
 		if (rank == 0){
 			elap_time = omp_get_wtime() - elap_time;
 			print_vect(OUTPUT_FILE, res, nrows);
-			print_time(argv[4], elap_time);
+			print_time(argv[2], elap_time);
 			free(res);
 		}
 		
