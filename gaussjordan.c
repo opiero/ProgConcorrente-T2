@@ -20,6 +20,7 @@ Paulo Sergio Lopes de Souza
 #define MATRIX_FILE "matriz.txt"
 #define VECTOR_FILE "vetor.txt"
 #define OUTPUT_FILE "resultado.txt"
+#define TIME_FILE "time.txt"
 
 #define ALLOC_INIT_SIZE 8 //Nao pode ser < 0
 #define DELIMITERS " \t,;"
@@ -480,14 +481,15 @@ int main (int argc, char * argv[])
 			res = sequential_gaussjordan(mat, nrows, ncols);
 			elap_time = omp_get_wtime() - elap_time;
 			print_vect(OUTPUT_FILE, res, nrows);
-			print_time(argv[2], elap_time);
+			print_time(TIME_FILE, elap_time);
 			free(res);
 			free_mat((void**)mat, nrows);
 		}
 	}
 	else{
 		//Definicao do numero de threads e armazenamento do tempo inicial
-		n_threads = atoi(argv[1]);
+		if (argc >= 2) n_threads = atoi(argv[1]);
+		else n_threads = 8;
 		if (rank==0) elap_time = omp_get_wtime();
 
 		//Atribuicao das linhas para cada processo
@@ -504,7 +506,7 @@ int main (int argc, char * argv[])
 		if (rank == 0){
 			elap_time = omp_get_wtime() - elap_time;
 			print_vect(OUTPUT_FILE, res, nrows);
-			print_time(argv[2], elap_time);
+			print_time(TIME_FILE, elap_time);
 			free(res);
 		}
 		
