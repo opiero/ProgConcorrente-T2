@@ -17,8 +17,8 @@ Paulo Sergio Lopes de Souza
 #include <omp.h>
 #include <mpi.h>
 
-#define MATRIX_FILE "matriz.txt"
-#define VECTOR_FILE "vetor.txt"
+#define MATRIX_FILE "matriz1000.txt"
+#define VECTOR_FILE "vetor1000.txt"
 #define OUTPUT_FILE "resultado.txt"
 
 #define ALLOC_INIT_SIZE 8 //Nao pode ser < 0
@@ -338,6 +338,10 @@ element * parallel_gaussjordan(element ** mat, int nrows, int ncols, int job_siz
 		recv_idx = (int*) malloc(nproc*sizeof(int));
 		recv_max = (element*) malloc(nproc*sizeof(element));
 	}
+	else {
+		recv_idx = NULL;
+		recv_max = NULL;
+	}
 
 	omp_set_dynamic(0);
 	omp_set_num_threads(n_threads);
@@ -439,7 +443,7 @@ int main (int argc, char * argv[])
 	//Variaveis necesarias para todos os processos
 	int nrows, ncols, job_size;
 	int * job_lines_idxs;
-	element ** mat;
+	element ** mat = NULL;
 
 	//Variaveis para o OpenMPI necesarias para todos os processos
 	int rank, msgtag = 0, nproc;
