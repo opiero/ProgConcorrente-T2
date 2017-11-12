@@ -509,9 +509,8 @@ int main (int argc, char * argv[])
 		free(vect);
 	}
 	
-	//Definicao do numero de threads e armazenamento do tempo inicial
+	//Definicao do numero de threads
 	if (argc >= 2) nthreads = atoi(argv[1]);
-	if (rank==0) elap_time = omp_get_wtime();
 
 	//Atribuicao das linhas para cada processo
 	assign_initial_lines(&nrows, &ncols, &job_size, &job_lines_idxs, rank, nproc);
@@ -523,6 +522,7 @@ int main (int argc, char * argv[])
 	Cada processo realiza suas operacoes do gauss-jordan, e para 
 	o processo 0 e retornado o vetor com as respostas
 	*/
+	if (rank==0) elap_time = omp_get_wtime();
 	res = parallel_gaussjordan(mat, nrows, ncols, job_size, job_lines_idxs, nproc, rank, &msgtag, nthreads);
 	if (rank == 0){
 		elap_time = omp_get_wtime() - elap_time;
