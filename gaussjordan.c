@@ -59,8 +59,15 @@ void close_file(FILE * file)
 
 
 
+/*
+Le o vetor b de Ax = b do arquivo filename
+*/
 element * read_vect(char * filename, int * nrows)
 {
+	/*
+	Alloca o vetor com um tamanho inicial. O tamanho do vetor cresce 
+	dinamicamente e exponencialmente para reduzir o numero de reallocs
+	*/
 	(*nrows) = 0;
 	int alloced_row = ALLOC_INIT_SIZE;
 	element * vect = (element*) malloc(alloced_row*sizeof(element));
@@ -68,15 +75,23 @@ element * read_vect(char * filename, int * nrows)
 	size_t linesize = 0;
 	char * line = NULL;
 	FILE * vect_file = open_file(filename, "r");
+	//Enquanto ainda existir uma nova linha
 	while(getline(&line, &linesize, vect_file) != -1){
-		while ((*nrows) >= alloced_row){
-			alloced_row*=2;
-			vect = (element*) realloc(vect, alloced_row*sizeof(element));
-		}
+		//Ignora linhas vazias
+		if (strcmp(line, "\n") != 0){
+			//Incrementar o tamanho alocado do vetor caso necessario
+			while ((*nrows) >= alloced_row){
+				// *=2 ao inves de ++ para reduzir o numero de reallocs
+				alloced_row*=2;
+				vect = (element*) realloc(vect, alloced_row*sizeof(element));
+			}
 
-		sscanf(line, ELEMENT_READ_MASK, vect + ((*nrows)++));
-		free(line);
-		line = NULL;
+			//Incrementa o numero de elementos do vetor caso haja um elemento na linha
+			if (sscanf(line, ELEMENT_READ_MASK, vect + (*nrows)) == 1) (*nrows)++;
+			free(line);
+			//line=NULL e necessario para o getline()
+			line = NULL;
+		}
 	}
 	free(line);
 	close_file(vect_file);
@@ -98,8 +113,15 @@ void print_vect(char * filename, element * vect, int nrows)
 
 
 
+/*
+Le a matriz A de Ax = b do arquivo filename
+*/
 element ** read_mat(char * filename, int * nrows, int * ncols)
 {
+	/*
+	Alloca a matriz com um tamanho inicial. O tamanho da matriz cresce 
+	dinamicamente e exponencialmente para reduzir o numero de reallocs
+	*/
 	(*nrows) = (*ncols) = 0;
 	int alloced_col = ALLOC_INIT_SIZE, alloced_row = ALLOC_INIT_SIZE;
 	element ** mat = (element**) malloc(alloced_row*sizeof(element*));
@@ -110,37 +132,50 @@ element ** read_mat(char * filename, int * nrows, int * ncols)
 	FILE * mat_file = open_file(filename, "r");
 	if (getline(&line, &linesize, mat_file) == -1) printf("No lines on file\n");
 	char * aux_str = strtok(line, DELIMITERS);
+	//Leitura da primeira linha para definir o numero de colunas da matriz
 	while(aux_str != NULL){
+		//Aumenta o numero de colunas exponencialmente se necessario.
 		while ((*ncols) >= alloced_col){
 			alloced_col*=2;
 			(*mat) = (element*) realloc((*mat), alloced_col*sizeof(element));
 		}
 
+		//Le no numero
 		if (sscanf(aux_str, ELEMENT_READ_MASK, (*mat) + (*ncols)) == 1) (*ncols)++;
+		//Pega o proximo numero na linha
 		aux_str = strtok(NULL, DELIMITERS);
 	}
-	if (alloced_col < (*ncols)+1) (*mat) = (element*) realloc((*mat), ((*ncols)+1)*sizeof(element));
+	//Alloca 1 coluna a mais para inserir o vetor b posteriormente
+	if (alloced_col < (*ncols)+1) (*mat) = (element*)//line=NULL e necessario para o getline() realloc((*mat), ((*ncols)+1)*sizeof(element));
 	free(line);
 
 	line = NULL;
 	(*nrows) = 1;
+	//Leitura do resto da matriz
 	while (getline(&line, &linesize, mat_file) != -1){
-		while ((*nrows) >= alloced_row){
-			alloced_row*=2;
-			mat = (element**) realloc(mat, alloced_row*sizeof(element*));
-		}
-		mat[(*nrows)] = (element*) malloc(((*ncols)+1)*sizeof(element));
+		//Ignora linhas vazias
+		if (strcmp(line, "\n") != 0){
+			//Aumenta o numero de linhas exponencialmente se necessario.
+			while ((*nrows) >= alloced_row){
+				alloced_row*=2;
+				mat = (element**) realloc(mat, alloced_row*sizeof(element*));
+			}
+			//Alloca 1 coluna a mais para inserir o vetor b posteriormente
+			mat[(*nrows)] = (element*) malloc(((*ncols)+1)*sizeof(element));
 
-		int cur_col = 0;
-		aux_str = strtok(line, DELIMITERS);
-		while(aux_str != NULL) {
-			sscanf(aux_str, ELEMENT_READ_MASK, mat[(*nrows)] + (cur_col++));
-			aux_str = strtok(NULL, DELIMITERS);
-		}
+			int cur_col = 0;
+			aux_str = strtok(line, DELIMITERS);
+			while(aux_str != NULL) {
+				//Le o numero atual e pega o proximo
+				if (sscanf(aux_str, ELEMENT_READ_MASK, mat[(*nrows)] + cur_col) == 1) cur_col++;
+				aux_str = strtok(NULL, DELIMITERS);
+			}
 
-		(*nrows)++;
-		free(line);
-		line = NULL;
+			(*nrows)++;
+			free(line);
+			//line=NULL e necessario para o getline()
+			line = NULL;
+		}
 	}
 	free(line);
 	close_file(mat_file);
@@ -168,61 +203,6 @@ void append_col(element ** mat, int nrows, int * ncols, element * col)
 	int i;
 	for (i=0; i<nrows; i++) mat[i][(*ncols)] = col[i];
 	(*ncols)++;
-}
-
-
-
-/*
-Realiza o algoritimo de gaussjordan utilizando apenas
-uma maquina e uma thread, sequencialemnet. Retorna o vetor
-resposta com o valor das variaveis. Aceita matrizes nao-quadradas.
-*/
-element * sequential_gaussjordan(element ** mat, int nrows, int ncols)
-{
-	//ncols-1 para desconsiderar a ultima coluna, que e a coluna com os vator resultado
-	int i, j, k, max_idx, min = ((ncols-1) <= nrows) ? (ncols-1) : nrows;
-	element max, rat;
-	element * aux_row;
-	for (j=0; j<min; j++){
-		/*
-		Pega o elemento com maior valor em modulo na coluna para reduzir erro numerico.
-		Depois troca a linha desse elemento com a linha da coluna da iteracao atual.
-		Desconsidera as linhas das iteracoes anteriores porque elas nao podem ser utilizadas,
-		ja que elas mudariam os valores das posicoes ja zeradas.
-		*/
-		max_idx = -1;
-		max = 0;
-		for (i=j; i<nrows; i++){
-			if (MOD(mat[i][j]) > MOD(max)){
-				max = mat[i][j];
-				max_idx = i;
-			}
-		}
-		aux_row = mat[j];
-		mat[j] = mat[max_idx];
-		mat[max_idx] = aux_row;
-
-		/*
-		Para todas as linhas menos a da iteracao atual e feita
-		a multiplicacao e soma das linhascom o objetivo de zerar
-		todos os elementos da coluna menos a diagonal principal
-		*/
-		for (i=0; i<nrows; i++){
-			if (i != j){
-				rat = mat[i][j] / mat[j][j];
-				for (k=0; k<ncols; k++) mat[i][k] -= rat*mat[j][k];
-			}
-		}
-	}
-
-	/*
-	Calcular o vetor resposta dividindo a ultima coluna (coluna b em Ax = b)
-	pelos coeficientes na diagonal principal
-	*/
-	element * res = (element*) malloc(nrows*sizeof(element));
-	for (i=0; i<nrows; i++) res[i] = mat[i][ncols-1] / mat[i][i];
-
-	return res;
 }
 
 
