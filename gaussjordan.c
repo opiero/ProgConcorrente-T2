@@ -22,7 +22,8 @@ Paulo Sergio Lopes de Souza
 #define OUTPUT_FILE "resultado.txt"
 #define TIME_FILE "time.txt"
 
-#define ALLOC_INIT_SIZE 8 //Nao pode ser < 0
+//Nao pode ser <= 0
+#define ALLOC_INIT_SIZE 8
 #define DELIMITERS " \t,;"
 
 typedef double element;
@@ -273,7 +274,7 @@ void send_final_answer(element ** mat, int ncols, int job_size, int * job_lines_
 	//Criacao de um vetor auxiliar para mandar com apenas 1 send
 	int i;
 	element * res = (element*) malloc(job_size*sizeof(element));
-	for (i=0; i<job_size; i++) res[i] = mat[i][ncols];
+	for (i=0; i<job_size; i++) res[i] = mat[i][ncols-1];
 
 	//Envio dos indices na matriz original e da resposta 
 	MPI_Send(job_lines_idxs, job_size, MPI_INT, 0, (*init_tag), MPI_COMM_WORLD);
@@ -323,65 +324,96 @@ element * recv_final_answer(int nrows, int nproc,  int * init_tag)
 
 
 
-element * parallel_gaussjordan(element ** mat, int nrows, int ncols, int job_size, int * job_lines_idxs, int nproc, int rank, int * init_tag, int n_threads)
+/*
+Realiza o algoritimo em paralelo com nproc processos
+e nthreads threads por processo
+*/
+element * parallel_gaussjordan(element ** mat, int nrows, int ncols, int job_size, int * job_lines_idxs, int nproc, int rank, int * init_tag, int nthreads)
 {
-	ncols--;
-	int i, j, k, min = (ncols <= nrows) ? ncols : nrows;
+	/*
+	Declaracao das variaveis. min recebe a menor dimensao para realizar o problema para matrizes nao quadradas
+	ncols-1 pois precisa desconsiderar a ultima coluna com o vetor b de Ax = b
+	*/
+	int i, j, k, id, min = ((ncols-1) <= nrows) ? (ncols-1) : nrows;
 	int local_max_idx, global_max_idx, global_max_proc;
-	int * recv_idx, * aux_max_idx_vect = (int*) malloc(n_threads*sizeof(int));
-	element local_max, global_max;
-	element * global_max_line = (element*) malloc((ncols+1)*sizeof(element)), * recv_max, * aux_max_vect = (element*) malloc(n_threads*sizeof(element));
+	int * recv_idx = NULL, * aux_max_idx_vect = NULL;
+	element local_max, global_max, rat;
+	element * global_max_line = NULL, * recv_max = NULL, * aux_max_vect = NULL;
+	
+	//Allocacao dos vetores
+	global_max_line = (element*) malloc(ncols*sizeof(element));
+	aux_max_vect = (element*) malloc(nthreads*sizeof(element));
+	aux_max_idx_vect = (int*) malloc(nthreads*sizeof(int));
 	if (rank==0){
 		recv_idx = (int*) malloc(nproc*sizeof(int));
 		recv_max = (element*) malloc(nproc*sizeof(element));
 	}
-	else {
-		recv_idx = NULL;
-		recv_max = NULL;
-	}
 
+	//Especificao o numero de threads
 	omp_set_dynamic(0);
-	omp_set_num_threads(n_threads);
+	omp_set_num_threads(nthreads);
+	//Iterar nas colunas da matriz
 	for (j=0; j<min; j++){
+		/*
+		Encontra o maximo valor e indice daquela coluna para cada processo
+		utilizando diversas threads. Reduce de omp nao funciona com double, entao
+		foi utilizado um vetor auxiliar para armazenar o maximo de cada threads,
+		e depois foi feito o maximo desse vetor
+		*/
 		local_max = 0;
 		local_max_idx = -1;
-		memset(aux_max_vect, 0, n_threads*sizeof(element));
-		memset(aux_max_idx_vect, -1, n_threads*sizeof(int));
-		#pragma omp parallel for shared(aux_max_vect, aux_max_idx_vect) private(i)
+		memset(aux_max_vect, 0, nthreads*sizeof(element));
+		memset(aux_max_idx_vect, -1, nthreads*sizeof(int));
+		//Maximo por threads
+		#pragma omp parallel for shared(aux_max_vect, aux_max_idx_vect) private(i, id)
 		for (i=0; i<job_size; i++)
 		{
-			int id = omp_get_thread_num();
+			id = omp_get_thread_num();
 			if ((job_lines_idxs[i] >= j) && (MOD(mat[i][j]) > MOD(aux_max_vect[id]))){
 				aux_max_vect[id] = mat[i][j];
 				aux_max_idx_vect[id] = i;
 			}
 		}
-		for (i=0; i<n_threads; i++){
+		//Maximo do processo
+		for (i=0; i<nthreads; i++){
 			if (MOD(aux_max_vect[i]) >= MOD(local_max)){
 				local_max = aux_max_vect[i];
 				local_max_idx = aux_max_idx_vect[i];
 			}
 		}
 
+		/*
+		O processo 0 recebe o maximo e o indice do maximo de cada um dos outros processos,
+		e calcula o maximo global da matriz. Nao e necessario usar multithread ou reduction
+		pois o numero de processos é pequeno, entao nao haveria ganho significativo em desempenho
+		*/
 		MPI_Gather(job_lines_idxs + local_max_idx, 1, MPI_INT, recv_idx, 1, MPI_INT, 0, MPI_COMM_WORLD);
 		MPI_Gather(&local_max, 1, ELEMENT_MPI, recv_max, 1, ELEMENT_MPI, 0, MPI_COMM_WORLD);
 
+		//Maximo da matriz
 		if (rank==0){
 			global_max = 0;
 			global_max_proc = global_max_idx = -1;
-			for (k=0; k<nproc; k++){
-				if (MOD(recv_max[k]) > MOD(global_max)) {
-					global_max = recv_max[k];
-					global_max_idx = recv_idx[k];
-					global_max_proc = k;
+			for (i=0; i<nproc; i++){
+				if (MOD(recv_max[i]) > MOD(global_max)) {
+					global_max = recv_max[i];
+					global_max_idx = recv_idx[i];
+					global_max_proc = i;
 				}
 			}
 		}
 		
+		//Depois que o processo 0 calculou o maximo, ele faz um broadcast de quem e esse maximo
 		MPI_Bcast(&global_max, 1, ELEMENT_MPI, 0, MPI_COMM_WORLD);
 		MPI_Bcast(&global_max_idx, 1, MPI_INT, 0, MPI_COMM_WORLD);
 		MPI_Bcast(&global_max_proc, 1, MPI_INT, 0, MPI_COMM_WORLD);
 
+		/*
+		Troca de linhas, onde o processo que tem a linha de mesmo indice que a coluna da
+		iteracao atual troca de posicao com a linha do maximo atual, e o processo que tem a
+		linha do maximo faz o contrario. Essa troca e feita simplesmente alterando o
+		vetor que mapeia a linha do processo pra linha da matriz original
+		*/
 		#pragma omp parallel for private(i)
 		for (i=0; i<job_size; i++)
 		{
@@ -389,29 +421,31 @@ element * parallel_gaussjordan(element ** mat, int nrows, int ncols, int job_siz
 		}
 		if (rank == global_max_proc){
 			job_lines_idxs[local_max_idx] = j;
-			memcpy(global_max_line, mat[local_max_idx], (ncols+1)*sizeof(element));
+			//Armazenamento da linha maxima para o broadcast dela
+			memcpy(global_max_line, mat[local_max_idx], ncols*sizeof(element));
 		}
 
-		//printf("%d\n", global_max_proc);
-		MPI_Bcast(global_max_line, ncols+1, ELEMENT_MPI, global_max_proc, MPI_COMM_WORLD);
+		//Broadcast da linha pivo da iteracao atual
+		MPI_Bcast(global_max_line, ncols, ELEMENT_MPI, global_max_proc, MPI_COMM_WORLD);
 
-		ncols++;
-		#pragma omp parallel for private(i)
+		//Multiplicacao e soma das linhas para zerar a coluna, menos a diagonal principal
+		#pragma omp parallel for private(i, rat)
 		for (i=0; i<job_size; i++)
 		{
 			if (job_lines_idxs[i] != j){
-				element rat = mat[i][j]/global_max;
+				rat = mat[i][j]/global_max;
 				for (k=0; k<ncols; k++) mat[i][k] -= rat*global_max_line[k];
 			}
 		}
-		ncols--;
 
+		//Sincronizacao entre os processos
 		MPI_Barrier(MPI_COMM_WORLD);
 	}
+	//Divisao da coluna resposta pela diagonal principal para obter a resposta final
 	#pragma omp parallel for private(i)
 	for (i=0; i<job_size; i++)
 	{
-		mat[i][ncols] /= mat[i][job_lines_idxs[i]];
+		mat[i][ncols-1] /= mat[i][job_lines_idxs[i]];
 	}
 
 	free(aux_max_idx_vect);
@@ -422,9 +456,13 @@ element * parallel_gaussjordan(element ** mat, int nrows, int ncols, int job_siz
 		free(recv_max);
 	}
 
+	/*
+	Depois de ter sido computado os resultados, os processos enviam ao processo
+	0 o pedaco da resposta que eles tem
+	*/
 	if (rank == 0){
 		element * res = recv_final_answer(nrows, nproc, init_tag);
-		for (i=0; i<job_size; i++) res[job_lines_idxs[i]] = mat[i][ncols];
+		for (i=0; i<job_size; i++) res[job_lines_idxs[i]] = mat[i][ncols-1];
 		return res;
 	}
 	else{
@@ -450,7 +488,7 @@ void print_time(char * filename, double elap_time)
 int main (int argc, char * argv[])
 {
 	//Variaveis necesarias para todos os processos
-	int nrows = 0, ncols = 0, job_size = 0, n_threads = 1;
+	int nrows = 0, ncols = 0, job_size = 0, nthreads = 1;
 	int * job_lines_idxs = NULL;
 	element * res = NULL;
 	element ** mat = NULL;
@@ -472,7 +510,7 @@ int main (int argc, char * argv[])
 	}
 	
 	//Definicao do numero de threads e armazenamento do tempo inicial
-	if (argc >= 2) n_threads = atoi(argv[1]);
+	if (argc >= 2) nthreads = atoi(argv[1]);
 	if (rank==0) elap_time = omp_get_wtime();
 
 	//Atribuicao das linhas para cada processo
@@ -485,7 +523,7 @@ int main (int argc, char * argv[])
 	Cada processo realiza suas operacoes do gauss-jordan, e para 
 	o processo 0 e retornado o vetor com as respostas
 	*/
-	res = parallel_gaussjordan(mat, nrows, ncols, job_size, job_lines_idxs, nproc, rank, &msgtag, n_threads);
+	res = parallel_gaussjordan(mat, nrows, ncols, job_size, job_lines_idxs, nproc, rank, &msgtag, nthreads);
 	if (rank == 0){
 		elap_time = omp_get_wtime() - elap_time;
 		print_vect(OUTPUT_FILE, res, nrows);
