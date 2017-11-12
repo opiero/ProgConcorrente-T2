@@ -146,7 +146,7 @@ element ** read_mat(char * filename, int * nrows, int * ncols)
 		aux_str = strtok(NULL, DELIMITERS);
 	}
 	//Alloca 1 coluna a mais para inserir o vetor b posteriormente
-	if (alloced_col < (*ncols)+1) (*mat) = (element*)//line=NULL e necessario para o getline() realloc((*mat), ((*ncols)+1)*sizeof(element));
+	if (alloced_col < (*ncols)+1) (*mat) = (element*) realloc((*mat), ((*ncols)+1)*sizeof(element));
 	free(line);
 
 	line = NULL;
@@ -455,44 +455,30 @@ int main (int argc, char * argv[])
 		free(vect);
 	}
 	
-	if (nproc == 1){
-		if (rank==0){
-			elap_time = omp_get_wtime();
-			res = sequential_gaussjordan(mat, nrows, ncols);
-			elap_time = omp_get_wtime() - elap_time;
-			print_vect(OUTPUT_FILE, res, nrows);
-			print_time(TIME_FILE, elap_time);
-			free(res);
-			free_mat((void**)mat, nrows);
-		}
-	}
-	else{
-		//Definicao do numero de threads e armazenamento do tempo inicial
-		if (argc >= 2) n_threads = atoi(argv[1]);
-		else n_threads = 8;
-		if (rank==0) elap_time = omp_get_wtime();
+	//Definicao do numero de threads e armazenamento do tempo inicial
+	if (argc >= 2) n_threads = atoi(argv[1]);
+	if (rank==0) elap_time = omp_get_wtime();
 
-		//Atribuicao das linhas para cada processo
-		assign_initial_lines(&nrows, &ncols, &job_size, &job_lines_idxs, rank, nproc);
-		//Passagem das linhas das matrizes para os procesos apropriados
-		if (rank == 0) send_initial_lines(mat, nrows, ncols, nproc, &msgtag);
-		else mat = recv_initial_lines(ncols, job_size, &msgtag);
+	//Atribuicao das linhas para cada processo
+	assign_initial_lines(&nrows, &ncols, &job_size, &job_lines_idxs, rank, nproc);
+	//Passagem das linhas das matrizes para os procesos apropriados
+	if (rank == 0) send_initial_lines(mat, nrows, ncols, nproc, &msgtag);
+	else mat = recv_initial_lines(ncols, job_size, &msgtag);
 
-		/*
-		Cada processo realiza suas operacoes do gauss-jordan, e para 
-		o processo 0 e retornado o vetor com as respostas
-		*/
-		res = parallel_gaussjordan(mat, nrows, ncols, job_size, job_lines_idxs, nproc, rank, &msgtag, n_threads);
-		if (rank == 0){
-			elap_time = omp_get_wtime() - elap_time;
-			print_vect(OUTPUT_FILE, res, nrows);
-			print_time(TIME_FILE, elap_time);
-			free(res);
-		}
-		
-		free(job_lines_idxs);
-		free_mat((void**)mat, ((rank==0) ? nrows : job_size));
+	/*
+	Cada processo realiza suas operacoes do gauss-jordan, e para 
+	o processo 0 e retornado o vetor com as respostas
+	*/
+	res = parallel_gaussjordan(mat, nrows, ncols, job_size, job_lines_idxs, nproc, rank, &msgtag, n_threads);
+	if (rank == 0){
+		elap_time = omp_get_wtime() - elap_time;
+		print_vect(OUTPUT_FILE, res, nrows);
+		print_time(TIME_FILE, elap_time);
+		free(res);
 	}
+	
+	free(job_lines_idxs);
+	free_mat((void**)mat, ((rank==0) ? nrows : job_size));
 
 	MPI_Finalize();
 	return 0;
