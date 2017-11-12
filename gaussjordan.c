@@ -263,45 +263,61 @@ element ** recv_initial_lines(int ncols, int job_size, int * init_tag)
 
 
 
+/*
+Depois que terminou a computacao, os processos
+mandam ao root o valor da coluna de resposta deles, junto
+com o indice que aquela resposta pertence na matriz original 
+*/
 void send_final_answer(element ** mat, int ncols, int job_size, int * job_lines_idxs, int * init_tag)
 {
+	//Criacao de um vetor auxiliar para mandar com apenas 1 send
 	int i;
 	element * res = (element*) malloc(job_size*sizeof(element));
 	for (i=0; i<job_size; i++) res[i] = mat[i][ncols];
 
+	//Envio dos indices na matriz original e da resposta 
 	MPI_Send(job_lines_idxs, job_size, MPI_INT, 0, (*init_tag), MPI_COMM_WORLD);
 	MPI_Send(res, job_size, ELEMENT_MPI, 0, (*init_tag)+1, MPI_COMM_WORLD);
 	(*init_tag)+=1;
 	free(res);
 }
 
+/*
+Depois que terminou a computacao, o processo root
+recebe o valor da coluna de resposta dos outros processos,
+junto com o indice que aquela resposta pertence na matriz original 
+*/
 element * recv_final_answer(int nrows, int nproc,  int * init_tag)
 {
-	int i, j, aux_size = (nrows / nproc);
-	int * sizes = (int*) malloc((nproc-1)*sizeof(int));
-	for (i=0; i<nproc-1; i++){
-		if (i==nproc-2) aux_size += (nrows % nproc);
-		sizes[i] = aux_size;
-	}
-	
+	//Recebe de cada processo quais indices da matriz original ele tem
 	MPI_Status status;
+	int i, j, cur_size = (nrows / nproc);	
 	int ** idxs = (int**) malloc((nproc-1)*sizeof(int*));
-	for (i=0; i<nproc-1; i++){
-		idxs[i] = (int*) malloc(sizes[i]*sizeof(int));
-		MPI_Recv(idxs[i], sizes[i], MPI_INT, i+1, (*init_tag), MPI_COMM_WORLD, &status);
+	for (i=1; i<nproc; i++){
+		//Caso especial para o ultimo processo
+		if (i==nproc-1) cur_size += nrows % nproc;
+		idxs[i-1] = (int*) malloc(cur_size*sizeof(int));
+		MPI_Recv(idxs[i-1], cur_size, MPI_INT, i, (*init_tag), MPI_COMM_WORLD, &status);
 	}
 
-	element * aux_vect = (element*) malloc(aux_size*sizeof(element));
+	/*
+	Recebe de cada processo o pedaco da resposta que ele tem, e
+	armazena na resposta final ja na posicao correta
+	*/
+	cur_size = (nrows / nproc);	
+	element * aux_vect = (element*) malloc((cur_size + (nrows % nproc))*sizeof(element));
 	element * res = (element*) malloc(nrows*sizeof(element));
-	for (i=0; i<nproc-1; i++){
-		MPI_Recv(aux_vect, sizes[i], ELEMENT_MPI, i+1, (*init_tag)+1, MPI_COMM_WORLD, &status);
-		for (j=0; j<sizes[i]; j++) res[idxs[i][j]] = aux_vect[j];
+	for (i=1; i<nproc; i++){
+		//Caso especial para o ultimo processo
+		if (i==nproc-1) cur_size += nrows % nproc;
+		MPI_Recv(aux_vect, cur_size, ELEMENT_MPI, i, (*init_tag)+1, MPI_COMM_WORLD, &status);
+		//Armazena na resposta final na posicao correta, dada pelo vetor de indices rebebido
+		for (j=0; j<cur_size; j++) res[idxs[i-1][j]] = aux_vect[j];
 	}
 	(*init_tag)+=1;
 
 	free_mat((void**)idxs, nproc-1);
 	free(aux_vect);
-	free(sizes);
 	return res;
 }
 
