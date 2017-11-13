@@ -412,7 +412,7 @@ element * parallel_gaussjordan(element ** mat, int nrows, int ncols, int job_siz
 		Troca de linhas, onde o processo que tem a linha de mesmo indice que a coluna da
 		iteracao atual troca de posicao com a linha do maximo atual, e o processo que tem a
 		linha do maximo faz o contrario. Essa troca e feita simplesmente alterando o
-		vetor que mapeia a linha do processo pra linha da matriz original
+		vetor job_lines_idxs, que mapeia a linha do processo para linha da matriz original
 		*/
 		#pragma omp parallel for private(i)
 		for (i=0; i<job_size; i++)
